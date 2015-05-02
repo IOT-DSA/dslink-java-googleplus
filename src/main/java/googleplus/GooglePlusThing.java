@@ -26,6 +26,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.plus.Plus;
 import com.google.api.services.plus.Plus.Activities;
+import com.google.api.services.plus.Plus.People;
 import com.google.api.services.plus.PlusScopes;
 
 public class GooglePlusThing {
@@ -81,12 +82,20 @@ public class GooglePlusThing {
 		Action act = new Action(Permission.READ, new ActivitySearchHandler());
 		act.addParameter(new Parameter("query", ValueType.STRING));
 		node.createChild("searchActivities").setAction(act).build();
+		act = new Action(Permission.READ, new PeopleSearchHandler());
+		act.addParameter(new Parameter("query", ValueType.STRING));
+		node.createChild("searchPeople").setAction(act).build();
 	}
 	
 	private class LoginHandler implements Handler<ActionResult> {
 		public void handle(ActionResult event) {
 			username = event.getParameter("username", ValueType.STRING).getString();
 			System.out.println(username);
+			
+			NodeBuilder builder = node.createChild("logout");
+			builder.setAction(new Action(Permission.READ, new LogoutHandler()));
+			builder.build();
+			
 			try {
 				Credential credential = flow.loadCredential(username);
 				if (credential != null) {
@@ -96,7 +105,7 @@ public class GooglePlusThing {
 				}
 				
 				String authurl = flow.newAuthorizationUrl().setRedirectUri("http://localhost").build();
-				NodeBuilder builder = node.createChild("Authorization URL");
+				builder = node.createChild("Authorization URL");
 				builder.setValue(new Value(authurl));
 				builder.build();
 				Action act = new Action(Permission.READ, new AuthHandler());
@@ -143,4 +152,40 @@ public class GooglePlusThing {
 		}
 	}
 	
+	private class PeopleSearchHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			String query = event.getParameter("query", ValueType.STRING).getString();
+			People ppl = plus.people();
+			String result = null;
+			try {
+				result = ppl.search(query).execute().toString();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			NodeBuilder builder = node.createChild("SearchResults");
+			builder.setValue(new Value(result));
+			builder.build();
+		}
+	}
+	
+	private class LogoutHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			logout();
+		}
+	}
+	
+	private void logout() {
+		plus = null;
+		username = null;
+		flow = null;
+		httpTransport = null;
+		if (node.getChildren() != null) {
+			for (Node child: node.getChildren().values()) {
+				node.removeChild(child);
+			}
+		}
+		init();
+	}
+			
 }
