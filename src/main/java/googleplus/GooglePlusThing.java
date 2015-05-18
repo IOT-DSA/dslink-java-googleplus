@@ -1,7 +1,7 @@
 package googleplus;
 
+import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 
@@ -18,8 +18,8 @@ import org.vertx.java.core.Handler;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.TokenResponse;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
-import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.http.HttpResponseException;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
@@ -29,17 +29,20 @@ import com.google.api.services.plus.Plus.Activities;
 import com.google.api.services.plus.Plus.People;
 import com.google.api.services.plus.PlusScopes;
 
+
 public class GooglePlusThing {
 	
 	private Node node;
+	private Node err;
 	private String username;
+	private ClientSecrets client;
 	private final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 	private Plus plus;
 	private GoogleAuthorizationCodeFlow flow;
 	private NetHttpTransport httpTransport;
 	private static final String APPLICATION_NAME = "DGLogikBot";
 	private static final java.io.File DATA_STORE_DIR =
-		      new java.io.File(System.getProperty("user.home"), ".store/dgplusbot");
+		      new java.io.File(System.getProperty("user.home"), "dgplusbot");
 
 	
 	private GooglePlusThing(Node node) {
@@ -52,24 +55,54 @@ public class GooglePlusThing {
 		gp.init();
 	}
 	
+	private void clearErrorMsgs() {
+		if (err.getChildren() == null) return;
+		for (Node child: err.getChildren().values()) {
+			err.removeChild(child);
+		}
+	}
+	
 	private void init() {
+		
+		err = node.createChild("errors").build();
+		
+		NodeBuilder builder = node.createChild("resetEverything");
+		builder.setAction(new Action(Permission.READ, new ResetHandler()));
+		builder.build();
+		
+		if (client == null) client = ClientSecrets.load(new File(DATA_STORE_DIR, "clientSecrets.ser"));
+		if (client == null) {
+			makeSetupAction();
+			return;
+		}
+		String clientID = client.getID();
+		String clientSecret = client.getSecret();
+		
 		try {
 			httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 			FileDataStoreFactory dataStoreFactory = new FileDataStoreFactory(DATA_STORE_DIR);
-		    GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY,
-		            new InputStreamReader(GooglePlusThing.class.getResourceAsStream("/client_secret.json"), "US-ASCII"));
+		    
 		    flow = new GoogleAuthorizationCodeFlow.Builder(
-		            httpTransport, JSON_FACTORY, clientSecrets,
+		            httpTransport, JSON_FACTORY, clientID, clientSecret,
 		            Collections.singleton(PlusScopes.PLUS_ME)).setDataStoreFactory(
 		            dataStoreFactory).build();
+		    
+		    client.save(new File(DATA_STORE_DIR, "clientSecrets.ser"));
 		    //Credential credential = new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
 		    //plus = new Plus.Builder(httpTransport, JSON_FACTORY, credential).setApplicationName(APPLICATION_NAME).build();
 		    
 		} catch (GeneralSecurityException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			resetEverything();
+			return;
+			//e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			if (e instanceof HttpResponseException) {
+				resetEverything();
+				builder = err.createChild("auth error message");
+				builder.setValue(new Value("Error with OAuth, reseting"));
+				builder.build();
+				return;
+			}
 			e.printStackTrace();
 		}
 	    
@@ -78,13 +111,32 @@ public class GooglePlusThing {
 		node.createChild("login").setAction(act).build();
 	}
 	
+	private void makeSetupAction() {
+		Action act = new Action(Permission.READ, new SetupHandler());
+		act.addParameter(new Parameter("clientID", ValueType.STRING));
+		act.addParameter(new Parameter("clientSecret", ValueType.STRING));
+		node.createChild("setupClientSecrets").setAction(act).build();
+	}
+	
 	private void connect() {
+		clearErrorMsgs();
 		Action act = new Action(Permission.READ, new ActivitySearchHandler());
 		act.addParameter(new Parameter("query", ValueType.STRING));
 		node.createChild("searchActivities").setAction(act).build();
 		act = new Action(Permission.READ, new PeopleSearchHandler());
 		act.addParameter(new Parameter("query", ValueType.STRING));
 		node.createChild("searchPeople").setAction(act).build();
+	}
+	
+	private class SetupHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			String id = event.getParameter("clientID", ValueType.STRING).getString();
+			String secret = event.getParameter("clientSecret", ValueType.STRING).getString();
+			client = new ClientSecrets(id, secret);
+			node.removeChild("setupClientSecrets");
+			init();
+			
+		}
 	}
 	
 	private class LoginHandler implements Handler<ActionResult> {
@@ -95,6 +147,11 @@ public class GooglePlusThing {
 			NodeBuilder builder = node.createChild("logout");
 			builder.setAction(new Action(Permission.READ, new LogoutHandler()));
 			builder.build();
+			builder = node.createChild("deleteUserAccount");
+			builder.setAction(new Action(Permission.READ, new AccountDeleteHandler()));
+			builder.build();
+			
+			node.removeChild("login");
 			
 			try {
 				Credential credential = flow.loadCredential(username);
@@ -113,7 +170,13 @@ public class GooglePlusThing {
 				node.createChild("Authorize").setAction(act).build();
 				
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
+				if (e instanceof HttpResponseException) {
+					resetEverything();
+					builder = err.createChild("auth error message");
+					builder.setValue(new Value("Error with OAuth, reseting"));
+					builder.build();
+					return;
+				}
 				e.printStackTrace();
 			}
 		}
@@ -128,8 +191,15 @@ public class GooglePlusThing {
 				Credential credential = flow.createAndStoreCredential(tr, username);
 				plus = new Plus.Builder(httpTransport, JSON_FACTORY, credential).setApplicationName(APPLICATION_NAME).build();
 				connect();
+				node.removeChild("Authorize");
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
+				if (e instanceof HttpResponseException) {
+					resetEverything();
+					NodeBuilder builder = err.createChild("auth error message");
+					builder.setValue(new Value("Error with OAuth, reseting"));
+					builder.build();
+					return;
+				}
 				e.printStackTrace();
 			}
 		}
@@ -143,12 +213,23 @@ public class GooglePlusThing {
 			try {
 				result = acts.search(query).execute().toString();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
+				if (e instanceof HttpResponseException) {
+					resetEverything();
+					NodeBuilder builder = err.createChild("auth error message");
+					builder.setValue(new Value("Error with OAuth, reseting"));
+					builder.build();
+					return;
+				}
 				e.printStackTrace();
 			}
-			NodeBuilder builder = node.createChild("SearchResults");
-			builder.setValue(new Value(result));
-			builder.build();
+			Node sr = node.getChild("SearchResults");
+			if (sr == null) {
+				NodeBuilder builder = node.createChild("SearchResults");
+				builder.setValue(new Value(result));
+				builder.build();
+			} else {
+				sr.setValue(new Value(result));
+			}
 		}
 	}
 	
@@ -160,12 +241,23 @@ public class GooglePlusThing {
 			try {
 				result = ppl.search(query).execute().toString();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
+				if (e instanceof HttpResponseException) {
+					resetEverything();
+					NodeBuilder builder = err.createChild("auth error message");
+					builder.setValue(new Value("Error with OAuth, reseting"));
+					builder.build();
+					return;
+				}
 				e.printStackTrace();
 			}
-			NodeBuilder builder = node.createChild("SearchResults");
-			builder.setValue(new Value(result));
-			builder.build();
+			Node sr = node.getChild("SearchResults");
+			if (sr == null) {
+				NodeBuilder builder = node.createChild("SearchResults");
+				builder.setValue(new Value(result));
+				builder.build();
+			} else {
+				sr.setValue(new Value(result));
+			}
 		}
 	}
 	
@@ -186,6 +278,42 @@ public class GooglePlusThing {
 			}
 		}
 		init();
+	}
+	
+	private class AccountDeleteHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			accountDelete();
+		}
+	}
+	
+	private void accountDelete() {
+		try {
+			flow.getCredentialDataStore().delete(username);
+			logout();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	
+	private class ResetHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			resetEverything();
+		}
+	}
+	
+	private void resetEverything() {
+		client = null;
+		for (File f: DATA_STORE_DIR.listFiles()) {
+			if (!f.delete()) {
+				logout();
+				NodeBuilder builder = err.createChild("reset error message");
+				builder.setValue(new Value("reset failed. logging out."));
+				builder.build();
+				return;
+			}
+		}
+		logout();
 	}
 			
 }
