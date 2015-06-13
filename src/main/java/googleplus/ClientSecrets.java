@@ -8,7 +8,15 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class ClientSecrets implements Serializable {
+	private static final Logger LOGGER;
+	
+	static {
+		LOGGER = LoggerFactory.getLogger(ClientSecrets.class);
+	}
 	
 	/**
 	 * 
@@ -38,7 +46,7 @@ public class ClientSecrets implements Serializable {
             objectOut.close();
         } catch (IOException e) {
             String msg = "IOException while saving clientSecrets.";
-            System.out.println(msg);
+            LOGGER.error(msg);
         }
 	}
 	
@@ -52,10 +60,10 @@ public class ClientSecrets implements Serializable {
                 objectIn.close();
             } catch (IOException e) {
                 String msg = "IOException while loading accessToken.";
-                System.out.println(msg);
+                LOGGER.error(msg);
             } catch (ClassNotFoundException e) {
                 String msg = "ClassNotFoundException while loading accessToken.";
-                System.out.println(msg);
+                LOGGER.error(msg);
             }
         }
 		return retval;

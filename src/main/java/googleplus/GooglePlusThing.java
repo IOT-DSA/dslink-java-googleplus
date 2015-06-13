@@ -13,6 +13,8 @@ import org.dsa.iot.dslink.node.actions.ActionResult;
 import org.dsa.iot.dslink.node.actions.Parameter;
 import org.dsa.iot.dslink.node.value.Value;
 import org.dsa.iot.dslink.node.value.ValueType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.vertx.java.core.Handler;
 
 import com.google.api.client.auth.oauth2.Credential;
@@ -28,9 +30,16 @@ import com.google.api.services.plus.Plus;
 import com.google.api.services.plus.Plus.Activities;
 import com.google.api.services.plus.Plus.People;
 import com.google.api.services.plus.PlusScopes;
+import com.google.api.services.plus.model.ItemScope;
+import com.google.api.services.plus.model.Moment;
 
 
 public class GooglePlusThing {
+	private static final Logger LOGGER;
+	
+	static {
+		LOGGER = LoggerFactory.getLogger(GooglePlusThing.class);
+	}
 	
 	private Node node;
 	private Node err;
@@ -84,7 +93,7 @@ public class GooglePlusThing {
 		    
 		    flow = new GoogleAuthorizationCodeFlow.Builder(
 		            httpTransport, JSON_FACTORY, clientID, clientSecret,
-		            Collections.singleton(PlusScopes.PLUS_ME)).setDataStoreFactory(
+		            Collections.singleton(PlusScopes.PLUS_LOGIN)).setDataStoreFactory(
 		            dataStoreFactory).build();
 		    
 		    client.save(new File(DATA_STORE_DIR, "clientSecrets.ser"));
@@ -103,7 +112,7 @@ public class GooglePlusThing {
 				builder.build();
 				return;
 			}
-			e.printStackTrace();
+			LOGGER.debug("error: ", e);
 		}
 	    
 		Action act = new Action(Permission.READ, new LoginHandler());
@@ -126,6 +135,10 @@ public class GooglePlusThing {
 		act = new Action(Permission.READ, new PeopleSearchHandler());
 		act.addParameter(new Parameter("query", ValueType.STRING));
 		node.createChild("searchPeople").setAction(act).build();
+		act = new Action(Permission.READ, new MomentHandler());
+		act.addParameter(new Parameter("name", ValueType.STRING));
+		act.addParameter(new Parameter("description", ValueType.STRING));
+		node.createChild("makeMoment").setAction(act).build();
 	}
 	
 	private class SetupHandler implements Handler<ActionResult> {
@@ -142,7 +155,6 @@ public class GooglePlusThing {
 	private class LoginHandler implements Handler<ActionResult> {
 		public void handle(ActionResult event) {
 			username = event.getParameter("username", ValueType.STRING).getString();
-			System.out.println(username);
 			
 			NodeBuilder builder = node.createChild("logout");
 			builder.setAction(new Action(Permission.READ, new LogoutHandler()));
@@ -161,7 +173,7 @@ public class GooglePlusThing {
 					return;
 				}
 				
-				String authurl = flow.newAuthorizationUrl().setRedirectUri("http://localhost").build();
+				String authurl = flow.newAuthorizationUrl().set("requestvisibleactions", "http://schema.org/AddAction").setRedirectUri("http://localhost").build();
 				builder = node.createChild("Authorization URL");
 				builder.setValue(new Value(authurl));
 				builder.build();
@@ -177,7 +189,7 @@ public class GooglePlusThing {
 					builder.build();
 					return;
 				}
-				e.printStackTrace();
+				LOGGER.debug("error: ", e);
 			}
 		}
 	}
@@ -200,7 +212,7 @@ public class GooglePlusThing {
 					builder.build();
 					return;
 				}
-				e.printStackTrace();
+				LOGGER.debug("error: ", e);
 			}
 		}
 	}
@@ -220,7 +232,7 @@ public class GooglePlusThing {
 					builder.build();
 					return;
 				}
-				e.printStackTrace();
+				LOGGER.debug("error: ", e);
 			}
 			Node sr = node.getChild("SearchResults");
 			if (sr == null) {
@@ -248,7 +260,7 @@ public class GooglePlusThing {
 					builder.build();
 					return;
 				}
-				e.printStackTrace();
+				LOGGER.debug("error: ", e);
 			}
 			Node sr = node.getChild("SearchResults");
 			if (sr == null) {
@@ -257,6 +269,35 @@ public class GooglePlusThing {
 				builder.build();
 			} else {
 				sr.setValue(new Value(result));
+			}
+		}
+	}
+	
+	private class MomentHandler implements Handler<ActionResult> {
+		public void handle(ActionResult event) {
+			String name = event.getParameter("name", ValueType.STRING).getString();
+			String description = event.getParameter("description", ValueType.STRING).getString();
+			Moment moment = new Moment();
+			moment.setType("http://schema.org/AddAction");
+			ItemScope itemScope = new ItemScope();
+			itemScope.setId("target-id-1");
+			itemScope.setType("http://schema.org/AddAction");
+			itemScope.setName(name);
+			itemScope.setDescription(description);
+			moment.setObject(itemScope);
+			try {
+				Moment result = plus.moments().insert("me", "vault", moment).execute();
+				LOGGER.debug(result.getId());
+			} catch (IOException e) {
+				if (e instanceof HttpResponseException) {
+					LOGGER.debug("error: ", e);
+					resetEverything();
+					NodeBuilder builder = err.createChild("auth error message");
+					builder.setValue(new Value("Error with OAuth, reseting"));
+					builder.build();
+					return;
+				}
+				LOGGER.debug("error: ", e);
 			}
 		}
 	}
@@ -292,7 +333,7 @@ public class GooglePlusThing {
 			logout();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
-			e.printStackTrace();
+			LOGGER.debug("error: ", e);
 		}
 	}
 	
