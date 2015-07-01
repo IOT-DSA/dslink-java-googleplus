@@ -23,7 +23,7 @@ public class Main extends DSLinkHandler {
 			}
 		}
 		//args = new String[] { "-b", "http://localhost:8080/conn" };
-		DSLinkFactory.startResponder("gPlusResponder", args, new Main());
+		DSLinkFactory.startResponder("GooglePlus", args, new Main());
 	}
 	
 	@Override
