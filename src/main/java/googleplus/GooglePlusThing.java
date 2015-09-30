@@ -15,7 +15,7 @@ import org.dsa.iot.dslink.node.value.Value;
 import org.dsa.iot.dslink.node.value.ValueType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.vertx.java.core.Handler;
+import org.dsa.iot.dslink.util.handler.Handler;
 
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.TokenResponse;
@@ -345,13 +345,16 @@ public class GooglePlusThing {
 	
 	private void resetEverything() {
 		client = null;
-		for (File f: DATA_STORE_DIR.listFiles()) {
-			if (!f.delete()) {
-				logout();
-				NodeBuilder builder = err.createChild("reset error message");
-				builder.setValue(new Value("reset failed. logging out."));
-				builder.build();
-				return;
+		File[] files = DATA_STORE_DIR.listFiles();
+		if (files != null) {
+			for (File f : files) {
+				if (!f.delete()) {
+					logout();
+					NodeBuilder builder = err.createChild("reset error message");
+					builder.setValue(new Value("reset failed. logging out."));
+					builder.build();
+					return;
+				}
 			}
 		}
 		logout();
