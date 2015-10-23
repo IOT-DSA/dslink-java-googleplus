@@ -32,8 +32,8 @@ public class Main extends DSLinkHandler {
 	}
 	
 	@Override
-	public void onResponderConnected(DSLink link){
-		LOGGER.info("Connected");
+	public void onResponderInitialized(DSLink link){
+		LOGGER.info("Initialized");
 		
 		NodeManager manager = link.getNodeManager();
         Node superRoot = manager.getNode("/").getNode();
